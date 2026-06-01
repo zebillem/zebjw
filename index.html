@@ -64,6 +64,11 @@
   <button class="btn" onclick="loadTracks()">Find songs to remove</button>
 </div>
 
+<div class="card">
+  <button class="btn" onclick="testToken()">Test token</button>
+  <p id="test-result" class="status"></p>
+</div>
+ 
 <div id="step-tracks" class="card hidden">
   <p class="section-title" id="tracks-heading">Songs to remove</p>
   <div class="select-all-row">
@@ -99,6 +104,14 @@ function copyURI() {
   });
 }
 
+async function testToken() {
+  const res = await fetch('https://api.spotify.com/v1/me', {
+    headers: { Authorization: 'Bearer ' + accessToken }
+  });
+  const data = await res.json();
+  document.getElementById('test-result').textContent = JSON.stringify(data);
+}
+ 
 function startAuth() {
   const verifier = generateCodeVerifier();
   sessionStorage.setItem('cv', verifier);
