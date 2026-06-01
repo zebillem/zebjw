@@ -65,8 +65,8 @@
 </div>
 
 <div class="card">
-  <button class="btn" onclick="testToken()">Test token</button>
-  <p id="test-result" class="status"></p>
+  <button class="btn" onclick="testPlaylist()">Test playlist</button>
+  <p id="playlist-result" class="status"></p>
 </div>
  
 <div id="step-tracks" class="card hidden">
@@ -104,12 +104,12 @@ function copyURI() {
   });
 }
 
-async function testToken() {
-  const res = await fetch('https://api.spotify.com/v1/me', {
+async function testPlaylist() {
+  const res = await fetch('https://api.spotify.com/v1/playlists/6sceOkaGtM86PgchKQJDH2', {
     headers: { Authorization: 'Bearer ' + accessToken }
   });
   const data = await res.json();
-  document.getElementById('test-result').textContent = JSON.stringify(data);
+  document.getElementById('playlist-result').textContent = JSON.stringify(data);
 }
  
 function startAuth() {
