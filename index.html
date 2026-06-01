@@ -200,7 +200,11 @@ async function loadTracks() {
     allItems = allItems.concat(data.items || []);
     url = data.next || null;
   }
-  tracksToRemove = allItems.filter(item => item && item.track && item.added_at && new Date(item.added_at) < cutoffDate);
+  tracksToRemove = allItems.filter(item => {
+    if (!item || !item.added_at) return false;
+    const track = item.track || item.item;
+    return track && new Date(item.added_at) < cutoffDate;
+});
   renderTracks(tracksToRemove, cutoffDate);
 }
 
@@ -218,13 +222,14 @@ function renderTracks(tracks, cutoffDate) {
   document.getElementById('select-all').parentElement.classList.remove('hidden');
   document.getElementById('select-all').checked = true;
   tracks.forEach((item, i) => {
-    const artists = item.track.artists.map(a => a.name).join(', ');
+    const track = item.track || item.item;
+    const artists = track.artists.map(a => a.name).join(', ');
     const addedDate = new Date(item.added_at).toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'});
     const row = document.createElement('div');
     row.className = 'track-row';
     row.innerHTML = `<input type="checkbox" class="track-check" data-index="${i}" checked style="cursor:pointer;flex-shrink:0;">
       <div class="track-info">
-        <div class="track-name">${esc(item.track.name)}</div>
+        <div class="track-name">${esc(track.name)}</div>
         <div class="track-meta">${esc(artists)} · added ${addedDate}</div>
       </div>`;
     list.appendChild(row);
@@ -252,7 +257,10 @@ async function removeTracks() {
   const checked = [...document.querySelectorAll('.track-check:checked')];
   if (checked.length === 0) { alert('No songs selected.'); return; }
   if (!confirm(`Remove ${checked.length} song${checked.length !== 1 ? 's' : ''} from this playlist?`)) return;
-  const uris = checked.map(cb => tracksToRemove[parseInt(cb.dataset.index)].track.uri);
+  const uris = checked.map(cb => {
+    const item = tracksToRemove[parseInt(cb.dataset.index)];
+    return (item.track || item.item).uri;
+  });
   const prog = document.getElementById('progress');
   let removed = 0;
   for (let i = 0; i < uris.length; i += 100) {
