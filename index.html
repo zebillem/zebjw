@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spotify Playlist Cleaner</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #121212; color: #fff; padding: 1.5rem 1rem; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 0.25rem; }
+  .subtitle { font-size: 14px; color: #aaa; margin-bottom: 1.5rem; }
+  .card { background: #1e1e1e; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+  .step-label { font-size: 12px; color: #aaa; margin-bottom: 0.5rem; }
+  .uri-box { background: #2a2a2a; border-radius: 8px; padding: 0.5rem 0.75rem; font-family: monospace; font-size: 12px; color: #ccc; word-break: break-all; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .copy-btn { background: none; border: 1px solid #444; border-radius: 6px; padding: 4px 10px; font-size: 12px; color: #aaa; cursor: pointer; white-space: nowrap; }
+  .copy-btn:hover { background: #333; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px; border: 1px solid #444; border-radius: 8px; background: none; font-size: 14px; color: #fff; cursor: pointer; }
+  .btn:hover { background: #2a2a2a; }
+  .btn-green { background: #1DB954; border-color: #1DB954; color: #000; font-weight: 600; }
+  .btn-green:hover { background: #1aaa4c; }
+  .btn-danger { border-color: #c0392b; color: #e74c3c; }
+  .btn-danger:hover { background: #2a1a1a; }
+  select, input[type="date"] { width: 100%; padding: 8px 10px; border: 1px solid #444; border-radius: 8px; background: #2a2a2a; color: #fff; font-size: 14px; margin-bottom: 0.75rem; }
+  .track-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #2a2a2a; }
+  .track-row:last-child { border-bottom: none; }
+  .track-info { flex: 1; min-width: 0; }
+  .track-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .track-meta { font-size: 12px; color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status { font-size: 13px; color: #aaa; padding: 0.5rem 0; }
+  .section-title { font-size: 15px; font-weight: 600; margin-bottom: 0.75rem; }
+  .hidden { display: none; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 1rem; }
+  #progress { font-size: 13px; color: #aaa; margin-top: 0.5rem; }
+  .select-all-row { display: flex; align-items: center; gap: 8px; margin-bottom: 0.5rem; font-size: 13px; color: #aaa; }
+</style>
+</head>
+<body>
+
+<h1>🎵 Spotify playlist cleaner</h1>
+<p class="subtitle">Remove songs added before a chosen date</p>
+
+<div id="step-redirect" class="card">
+  <p class="step-label">Step 1 — add this redirect URI to your Spotify app</p>
+  <div class="uri-box">
+    <span id="redirect-uri-text">loading...</span>
+    <button class="copy-btn" onclick="copyURI()">copy</button>
+  </div>
+  <p style="font-size:12px; color:#888; margin-top:0.5rem;">developer.spotify.com → your app → Edit settings → Redirect URIs → add it → Save</p>
+</div>
+
+<div id="step-auth" class="card">
+  <p class="step-label">Step 2 — connect to Spotify</p>
+  <button class="btn btn-green" onclick="startAuth()">Connect Spotify</button>
+  <p id="auth-status" class="status hidden"></p>
+</div>
+
+<div id="step-playlist" class="card hidden">
+  <p class="section-title">Choose a playlist</p>
+  <select id="playlist-select" onchange="onPlaylistChange()">
+    <option value="">loading playlists...</option>
+  </select>
+  <label style="font-size:13px; color:#aaa;">Remove songs added before:</label>
+  <input type="date" id="cutoff-date" style="margin-top:4px;" />
+  <button class="btn" onclick="loadTracks()">Find songs to remove</button>
+</div>
+
+<div id="step-tracks" class="card hidden">
+  <p class="section-title" id="tracks-heading">Songs to remove</p>
+  <div class="select-all-row">
+    <input type="checkbox" id="select-all" onchange="toggleAll(this)" style="cursor:pointer;">
+    <label for="select-all" style="cursor:pointer;">select / deselect all</label>
+    <span id="selected-count" style="margin-left:auto;"></span>
+  </div>
+  <div id="track-list"></div>
+  <div class="actions">
+    <button class="btn btn-danger" onclick="removeTracks()">Remove selected</button>
+  </div>
+  <p id="progress"></p>
+</div>
+
+<script>
+const CLIENT_ID = '3a1ea496c32949f4aa192e4cc0ca1ee5';
+const SCOPES = 'playlist-read-private playlist-modify-public playlist-modify-private';
+let accessToken = null;
+let currentPlaylistId = null;
+let tracksToRemove = [];
+
+function getRedirectURI() {
+  return window.location.href.split('?')[0].split('#')[0];
+}
+
+document.getElementById('redirect-uri-text').textContent = getRedirectURI();
+
+function copyURI() {
+  navigator.clipboard.writeText(getRedirectURI()).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    btn.textContent = 'copied!';
+    setTimeout(() => { btn.textContent = 'copy'; }, 2000);
+  });
+}
+
+function startAuth() {
+  const verifier = generateCodeVerifier();
+  sessionStorage.setItem('cv', verifier);
+  generateCodeChallenge(verifier).then(challenge => {
+    const state = Math.random().toString(36).slice(2);
+    sessionStorage.setItem('state', state);
+    const params = new URLSearchParams({
+      client_id: CLIENT_ID,
+      response_type: 'code',
+      redirect_uri: getRedirectURI(),
+      code_challenge_method: 'S256',
+      code_challenge: challenge,
+      scope: SCOPES,
+      state
+    });
+    window.location.href = 'https://accounts.spotify.com/authorize?' + params;
+  });
+}
+
+function generateCodeVerifier() {
+  const arr = new Uint8Array(32);
+  crypto.getRandomValues(arr);
+  return btoa(String.fromCharCode(...arr)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+
+async function generateCodeChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+
+async function exchangeCode(code) {
+  const verifier = sessionStorage.getItem('cv');
+  const body = new URLSearchParams({
+    client_id: CLIENT_ID,
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: getRedirectURI(),
+    code_verifier: verifier
+  });
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body
+  });
+  const data = await res.json();
+  return data.access_token;
+}
+
+async function loadPlaylists() {
+  const res = await fetch('https://api.spotify.com/v1/me/playlists?limit=50', {
+    headers: { Authorization: 'Bearer ' + accessToken }
+  });
+  const data = await res.json();
+  const sel = document.getElementById('playlist-select');
+  sel.innerHTML = '<option value="">— choose a playlist —</option>';
+  (data.items || []).forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.name + (p.tracks ? ' (' + p.tracks.total + ' songs)' : '');
+    sel.appendChild(opt);
+  });
+}
+
+function onPlaylistChange() {
+  currentPlaylistId = document.getElementById('playlist-select').value;
+}
+
+async function loadTracks() {
+  const cutoff = document.getElementById('cutoff-date').value;
+  if (!cutoff) { alert('Please choose a cutoff date first.'); return; }
+  if (!currentPlaylistId) { alert('Please choose a playlist first.'); return; }
+  const cutoffDate = new Date(cutoff);
+  document.getElementById('step-tracks').classList.add('hidden');
+  document.getElementById('progress').textContent = 'Loading tracks...';
+  let url = `https://api.spotify.com/v1/playlists/${currentPlaylistId}/tracks?limit=100`;
+  let allItems = [];
+  while (url) {
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
+    if (!res.ok) {
+      const err = await res.json();
+      document.getElementById('progress').textContent = 'Error ' + res.status + ': ' + JSON.stringify(err);
+      return;
+    }
+    const data = await res.json();
+    allItems = allItems.concat(data.items || []);
+    url = data.next || null;
+  }
+  tracksToRemove = allItems.filter(item => item && item.track && item.added_at && new Date(item.added_at) < cutoffDate);
+  renderTracks(tracksToRemove, cutoffDate);
+}
+
+function renderTracks(tracks, cutoffDate) {
+  const list = document.getElementById('track-list');
+  list.innerHTML = '';
+  document.getElementById('step-tracks').classList.remove('hidden');
+  document.getElementById('progress').textContent = '';
+  if (tracks.length === 0) {
+    document.getElementById('tracks-heading').textContent = 'No songs found before that date';
+    document.getElementById('select-all').parentElement.classList.add('hidden');
+    return;
+  }
+  document.getElementById('tracks-heading').textContent = tracks.length + ' song' + (tracks.length !== 1 ? 's' : '') + ' added before ' + cutoffDate.toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'});
+  document.getElementById('select-all').parentElement.classList.remove('hidden');
+  document.getElementById('select-all').checked = true;
+  tracks.forEach((item, i) => {
+    const artists = item.track.artists.map(a => a.name).join(', ');
+    const addedDate = new Date(item.added_at).toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'});
+    const row = document.createElement('div');
+    row.className = 'track-row';
+    row.innerHTML = `<input type="checkbox" class="track-check" data-index="${i}" checked style="cursor:pointer;flex-shrink:0;">
+      <div class="track-info">
+        <div class="track-name">${esc(item.track.name)}</div>
+        <div class="track-meta">${esc(artists)} · added ${addedDate}</div>
+      </div>`;
+    list.appendChild(row);
+  });
+  updateSelectedCount();
+  list.querySelectorAll('.track-check').forEach(cb => cb.addEventListener('change', updateSelectedCount));
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function toggleAll(master) {
+  document.querySelectorAll('.track-check').forEach(cb => cb.checked = master.checked);
+  updateSelectedCount();
+}
+
+function updateSelectedCount() {
+  const total = document.querySelectorAll('.track-check').length;
+  const checked = document.querySelectorAll('.track-check:checked').length;
+  document.getElementById('selected-count').textContent = checked + ' of ' + total + ' selected';
+}
+
+async function removeTracks() {
+  const checked = [...document.querySelectorAll('.track-check:checked')];
+  if (checked.length === 0) { alert('No songs selected.'); return; }
+  if (!confirm(`Remove ${checked.length} song${checked.length !== 1 ? 's' : ''} from this playlist?`)) return;
+  const uris = checked.map(cb => tracksToRemove[parseInt(cb.dataset.index)].track.uri);
+  const prog = document.getElementById('progress');
+  let removed = 0;
+  for (let i = 0; i < uris.length; i += 100) {
+    const batch = uris.slice(i, i + 100).map(uri => ({ uri }));
+    await fetch(`https://api.spotify.com/v1/playlists/${currentPlaylistId}/tracks`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tracks: batch })
+    });
+    removed += batch.length;
+    prog.textContent = `Removed ${removed} of ${uris.length}...`;
+  }
+  prog.textContent = `Done! Removed ${removed} song${removed !== 1 ? 's' : ''}.`;
+  loadTracks();
+}
+
+async function init() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  const state = params.get('state');
+  if (code && state && state === sessionStorage.getItem('state')) {
+    const authStatus = document.getElementById('auth-status');
+    authStatus.textContent = 'Connecting...';
+    authStatus.classList.remove('hidden');
+    try {
+      accessToken = await exchangeCode(code);
+      window.history.replaceState({}, '', window.location.pathname);
+      document.getElementById('step-auth').classList.add('hidden');
+      document.getElementById('step-playlist').classList.remove('hidden');
+      await loadPlaylists();
+    } catch(e) {
+      authStatus.textContent = 'Auth failed. Please try again.';
+    }
+  }
+}
+
+init();
+</script>
+</body>
+</html>
