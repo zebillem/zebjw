@@ -205,6 +205,7 @@ async function loadTracks() {
     const track = item.track || item.item;
     return track && new Date(item.added_at) < cutoffDate;
 });
+  console.log('Tracks found:', tracksToRemove.length, 'cutoff:', cutoffDate);
   renderTracks(tracksToRemove, cutoffDate);
 }
 
@@ -222,21 +223,23 @@ function renderTracks(tracks, cutoffDate) {
   document.getElementById('select-all').parentElement.classList.remove('hidden');
   document.getElementById('select-all').checked = true;
   tracks.forEach((item, i) => {
-    const track = item.track || item.item;
-    const artists = track.artists.map(a => a.name).join(', ');
+    const trackObj = item.track || item.item || {};
+    const artistList = trackObj.artists ? trackObj.artists.map(a => a.name).join(', ') : 'Unknown';
+    const trackName = trackObj.name || 'Unknown';
     const addedDate = new Date(item.added_at).toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'});
     const row = document.createElement('div');
     row.className = 'track-row';
     row.innerHTML = `<input type="checkbox" class="track-check" data-index="${i}" checked style="cursor:pointer;flex-shrink:0;">
       <div class="track-info">
-        <div class="track-name">${esc(track.name)}</div>
-        <div class="track-meta">${esc(artists)} · added ${addedDate}</div>
+        <div class="track-name">${esc(trackName)}</div>
+        <div class="track-meta">${esc(artistList)} · added ${addedDate}</div>
       </div>`;
     list.appendChild(row);
   });
   updateSelectedCount();
   list.querySelectorAll('.track-check').forEach(cb => cb.addEventListener('change', updateSelectedCount));
 }
+
 
 function esc(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
